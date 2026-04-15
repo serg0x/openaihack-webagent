@@ -1,6 +1,6 @@
 import { load, type Cheerio, type CheerioAPI } from "cheerio";
 import type { AnyNode } from "domhandler";
-import { fetchHtml, normalizeInputUrl } from "@/lib/crawl";
+import { fetchHtml } from "@/lib/crawl";
 
 type PreviewPatch = {
   heroHeadline?: string;
@@ -136,8 +136,7 @@ function injectShell($: CheerioAPI, url: string, mode: "original" | "patched") {
 }
 
 export async function buildPreviewHtml({ url, mode, patch }: BuildPreviewArgs) {
-  const normalizedUrl = normalizeInputUrl(url);
-  const html = await fetchHtml(normalizedUrl);
+  const { html, finalUrl } = await fetchHtml(url);
   const $ = load(html);
 
   removeDangerousNodes($);
@@ -148,7 +147,7 @@ export async function buildPreviewHtml({ url, mode, patch }: BuildPreviewArgs) {
     patchTextNode($, locateCta($), patch.primaryCta || "", "cta");
   }
 
-  injectShell($, normalizedUrl, mode);
+  injectShell($, finalUrl, mode);
 
   return $.html();
 }

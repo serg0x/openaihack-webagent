@@ -1,7 +1,27 @@
 import { buildPreviewHtml } from "@/lib/preview";
+import { getErrorMessage, getErrorStatus } from "@/lib/request-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return character;
+    }
+  });
+}
 
 function renderErrorPreview(message: string) {
   return `<!doctype html>
@@ -31,7 +51,7 @@ function renderErrorPreview(message: string) {
     <body>
       <article>
         <h1>Preview unavailable</h1>
-        <p>${message}</p>
+        <p>${escapeHtml(message)}</p>
       </article>
     </body>
   </html>`;
@@ -70,9 +90,9 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The remote page could not be proxied.";
+    const message = getErrorMessage(error, "The remote page could not be proxied.");
     return new Response(renderErrorPreview(message), {
-      status: 500,
+      status: getErrorStatus(error, 500),
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   }

@@ -1,4 +1,7 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { load } from "cheerio";
+import { AppRouteError } from "@/lib/request-error";
 import type { CrawlPage, CrawlResult, PageRole, PreviewTargets } from "@/lib/types";
 
 const REQUEST_HEADERS = {
@@ -6,6 +9,10 @@ const REQUEST_HEADERS = {
     "AI Website Operator/0.1 (+https://localhost demo bot; hackathon preview)",
   accept: "text/html,application/xhtml+xml",
 };
+const FETCH_TIMEOUT_MS = 12_000;
+const MAX_HTML_BYTES = 1_500_000;
+const MAX_REDIRECTS = 5;
+const BLOCKED_HOSTNAME_SUFFIXES = [".localhost", ".local", ".internal"];
 
 const PAGE_ROLE_RULES: Array<{ role: PageRole; patterns: RegExp[] }> = [
   { role: "pricing", patterns: [/pricing/i, /plans?/i] },
@@ -30,36 +37,191 @@ function sameHostname(inputA: string, inputB: string) {
   return hostnameA === hostnameB;
 }
 
-export function normalizeInputUrl(rawUrl: string) {
+function isPrivateIpv4Address(address: string) {
+  const [firstOctet = 0, secondOctet = 0] = address.split(".").map((segment) => Number(segment));
+
+  if (firstOctet === 0 || firstOctet === 10 || firstOctet === 127) {
+    return true;
+  }
+
+  if (firstOctet === 169 && secondOctet === 254) {
+    return true;
+  }
+
+  if (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) {
+    return true;
+  }
+
+  return firstOctet === 192 && secondOctet === 168;
+}
+
+function isPrivateIpv6Address(address: string) {
+  const normalized = address.toLowerCase();
+
+  if (normalized === "::" || normalized === "::1") {
+    return true;
+  }
+
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+    return true;
+  }
+
+  return /^fe[89ab]/.test(normalized);
+}
+
+function isPrivateIpAddress(address: string) {
+  const version = isIP(address);
+
+  if (version === 4) {
+    return isPrivateIpv4Address(address);
+  }
+
+  if (version === 6) {
+    return isPrivateIpv6Address(address);
+  }
+
+  return false;
+}
+
+async function assertPublicHostname(hostname: string) {
+  const normalizedHostname = hostname.toLowerCase();
+
+  if (
+    normalizedHostname === "localhost" ||
+    BLOCKED_HOSTNAME_SUFFIXES.some((suffix) => normalizedHostname.endsWith(suffix))
+  ) {
+    throw new AppRouteError("Only public http(s) websites are supported for live analysis.", 400);
+  }
+
+  if (isIP(normalizedHostname)) {
+    if (isPrivateIpAddress(normalizedHostname)) {
+      throw new AppRouteError("Only public http(s) websites are supported for live analysis.", 400);
+    }
+
+    return;
+  }
+
+  let addresses;
+
+  try {
+    addresses = await lookup(normalizedHostname, { all: true, verbatim: true });
+  } catch {
+    throw new AppRouteError(`Could not resolve ${normalizedHostname}.`, 400);
+  }
+
+  if (!addresses.length) {
+    throw new AppRouteError(`Could not resolve ${normalizedHostname}.`, 400);
+  }
+
+  if (addresses.some((entry) => isPrivateIpAddress(entry.address))) {
+    throw new AppRouteError("Only public http(s) websites are supported for live analysis.", 400);
+  }
+}
+
+export async function normalizeInputUrl(rawUrl: string) {
   const trimmed = rawUrl.trim();
 
   if (!trimmed) {
-    throw new Error("Enter a website URL first.");
+    throw new AppRouteError("Enter a website URL first.", 400);
   }
 
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  const parsed = new URL(withProtocol);
+  let parsed: URL;
+
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw new AppRouteError("Enter a valid website URL.", 400);
+  }
+
+  if (!/^https?:$/.test(parsed.protocol)) {
+    throw new AppRouteError("Use an http or https website URL.", 400);
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new AppRouteError("Website URLs with embedded credentials are not supported.", 400);
+  }
+
   parsed.hash = "";
+
+  await assertPublicHostname(parsed.hostname);
+
   return parsed.toString();
 }
 
-export async function fetchHtml(url: string) {
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: REQUEST_HEADERS,
-    redirect: "follow",
-  });
+export async function fetchHtml(rawUrl: string) {
+  let currentUrl = await normalizeInputUrl(rawUrl);
 
-  if (!response.ok) {
-    throw new Error(`Could not fetch ${url} (${response.status}).`);
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let response: Response;
+
+    try {
+      response = await fetch(currentUrl, {
+        cache: "no-store",
+        headers: REQUEST_HEADERS,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new AppRouteError(`Timed out while fetching ${currentUrl}.`, 504);
+      }
+
+      throw new AppRouteError(`Could not fetch ${currentUrl}.`, 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+
+      if (!location) {
+        throw new AppRouteError(`Received a redirect without a location from ${currentUrl}.`, 502);
+      }
+
+      let redirectUrl: string;
+
+      try {
+        redirectUrl = new URL(location, currentUrl).toString();
+      } catch {
+        throw new AppRouteError(`Received an invalid redirect target from ${currentUrl}.`, 502);
+      }
+
+      currentUrl = await normalizeInputUrl(redirectUrl);
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new AppRouteError(`Could not fetch ${currentUrl} (${response.status}).`, 502);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) {
+      throw new AppRouteError(
+        `Expected HTML from ${currentUrl} but received ${contentType || "unknown content"}.`,
+        415,
+      );
+    }
+
+    const declaredLength = Number(response.headers.get("content-length") ?? "");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_HTML_BYTES) {
+      throw new AppRouteError("The target page is too large for a live crawl preview.", 413);
+    }
+
+    const html = await response.text();
+    if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
+      throw new AppRouteError("The target page is too large for a live crawl preview.", 413);
+    }
+
+    return {
+      html,
+      finalUrl: currentUrl,
+    };
   }
 
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html")) {
-    throw new Error(`Expected HTML from ${url} but received ${contentType || "unknown content"}.`);
-  }
-
-  return response.text();
+  throw new AppRouteError(`Too many redirects while fetching ${rawUrl}.`, 502);
 }
 
 function classifyRole(url: string) {
@@ -254,25 +416,26 @@ function collectCandidateLinks(html: string, homepageUrl: string) {
 }
 
 export async function crawlSite(rawUrl: string, maxPages = 5): Promise<CrawlResult> {
-  const normalizedUrl = normalizeInputUrl(rawUrl);
-  const homepageHtml = await fetchHtml(normalizedUrl);
-  const homepagePage = extractPage(normalizedUrl, homepageHtml);
-  const candidateLinks = collectCandidateLinks(homepageHtml, normalizedUrl).slice(0, maxPages - 1);
+  const homepageResponse = await fetchHtml(rawUrl);
+  const homepageHtml = homepageResponse.html;
+  const homepageUrl = homepageResponse.finalUrl;
+  const homepagePage = extractPage(homepageUrl, homepageHtml);
+  const candidateLinks = collectCandidateLinks(homepageHtml, homepageUrl).slice(0, maxPages - 1);
   const pages: CrawlPage[] = [homepagePage];
 
   for (const link of candidateLinks) {
     try {
-      const html = await fetchHtml(link);
-      pages.push(extractPage(link, html));
+      const pageResponse = await fetchHtml(link);
+      pages.push(extractPage(pageResponse.finalUrl, pageResponse.html));
     } catch {
       continue;
     }
   }
 
   return {
-    normalizedUrl,
-    homepageUrl: normalizedUrl,
-    domain: new URL(normalizedUrl).hostname.replace(/^www\./, ""),
+    normalizedUrl: homepageUrl,
+    homepageUrl,
+    domain: new URL(homepageUrl).hostname.replace(/^www\./, ""),
     pages,
     previewTargets: extractPreviewTargets(homepageHtml),
   };

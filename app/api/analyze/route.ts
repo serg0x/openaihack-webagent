@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { analyzeSite } from "@/lib/analysis";
 import { crawlSite } from "@/lib/crawl";
 import { buildDemoAnalysis } from "@/lib/fixture";
+import { getErrorMessage, getErrorStatus } from "@/lib/request-error";
 import type { AnalyzeRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -9,14 +10,6 @@ export const maxDuration = 60;
 
 const DEFAULT_PERSONA =
   "A startup operator who wants to quickly understand the product, trust it, and decide whether to take the next step.";
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Something went wrong while analyzing the website.";
-}
 
 export async function POST(request: Request) {
   let body: AnalyzeRequest;
@@ -50,15 +43,15 @@ export async function POST(request: Request) {
 
   try {
     const crawl = await crawlSite(url);
-    const analysis = await analyzeSite({ url, persona, crawl });
+    const analysis = await analyzeSite({ url: crawl.homepageUrl, persona, crawl });
     return NextResponse.json(analysis);
   } catch (error) {
     return NextResponse.json(
       {
-        error: getErrorMessage(error),
+        error: getErrorMessage(error, "Something went wrong while analyzing the website."),
         demoAvailable: true,
       },
-      { status: 500 },
+      { status: getErrorStatus(error, 500) },
     );
   }
 }
