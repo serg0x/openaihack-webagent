@@ -1,23 +1,31 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { CopyButton } from "@/components/copy-button";
 import type { AnalysisResult } from "@/lib/types";
 
 const DEFAULT_PERSONA =
   "A B2B startup buyer who wants to understand the product fast, see proof, and know the best next step.";
 
-const EMPTY_LOOP = [
-  "Crawl the homepage plus the most relevant internal pages.",
-  "Score answerability around clarity, trust, audience fit, CTA, and evidence.",
-  "Generate a homepage patch with sharper copy and schema.",
-  "Preview the patch on a proxied version of the live homepage.",
+const EMPTY_STEPS = [
+  "Crawl the homepage and a few high-signal supporting pages.",
+  "Test whether the site clearly answers the core buyer questions.",
+  "Score clarity, proof, CTA strength, and AI answerability.",
+  "Generate a homepage patch and preview it on the live site shell.",
 ];
 
 const DELIVERABLES = [
-  "5 buyer questions with evidence",
+  "Five-question explainability audit with evidence",
   "Hero, CTA, FAQ, and schema patch",
-  "Side-by-side original and patched homepage preview",
+  "Live before-and-after homepage preview",
+];
+
+const SCORE_QUESTIONS = [
+  "What does this company do?",
+  "Who is it for?",
+  "Why should I trust it?",
+  "What should I do next?",
+  "How confidently could an AI assistant explain it from the site alone?",
 ];
 
 function formatTimestamp(isoString: string) {
@@ -28,13 +36,9 @@ function formatTimestamp(isoString: string) {
 }
 
 function scoreTone(score: number) {
-  if (score >= 80) return "text-[var(--accent-deep)]";
-  if (score >= 60) return "text-[#856322]";
-  return "text-[var(--warning)]";
-}
-
-function joinClasses(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(" ");
+  if (score >= 80) return "text-emerald-600";
+  if (score >= 60) return "text-amber-600";
+  return "text-rose-600";
 }
 
 function buildPreviewUrl(result: AnalysisResult, mode: "original" | "patched") {
@@ -47,6 +51,9 @@ function buildPreviewUrl(result: AnalysisResult, mode: "original" | "patched") {
     params.set("headline", result.patch.heroHeadline);
     params.set("subheadline", result.patch.heroSubheadline);
     params.set("cta", result.patch.primaryCta);
+    params.set("originalHeadline", result.crawl.previewTargets.headlineText);
+    params.set("originalSubheadline", result.crawl.previewTargets.subheadlineText);
+    params.set("originalCta", result.crawl.previewTargets.ctaText);
   }
 
   return `/api/preview?${params.toString()}`;
@@ -65,135 +72,38 @@ function formatEvidenceLabel(evidenceUrl: string) {
     .replace(/-/g, " ");
 }
 
-type SectionShellProps = {
-  title: string;
-  eyebrow?: string;
-  summary?: string;
-  className?: string;
-  children: React.ReactNode;
-};
-
-function SectionShell({
+function SectionHeading({
   title,
-  eyebrow,
-  summary,
-  className,
-  children,
-}: SectionShellProps) {
+  description,
+  actions,
+}: {
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}) {
   return (
-    <section
-      className={joinClasses(
-        "rounded-[30px] border border-[var(--line)] bg-[var(--surface)] p-6 shadow-[var(--shadow)] backdrop-blur lg:p-7",
-        className,
-      )}
-    >
-      {eyebrow ? (
-        <p className="text-[11px] font-semibold tracking-[0.24em] text-[var(--ink-soft)] uppercase">
-          {eyebrow}
-        </p>
-      ) : null}
-      <div className="mt-2 flex flex-col gap-3 border-b border-[var(--line)] pb-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.04em]">{title}</h2>
-          {summary ? (
-            <p className="mt-2 max-w-2xl text-sm leading-7 text-[var(--ink-soft)]">{summary}</p>
-          ) : null}
-        </div>
+    <div className="md:flex md:items-end md:justify-between">
+      <div className="min-w-0 flex-1">
+        <h2 className="text-xl font-semibold tracking-tight text-gray-900 sm:text-2xl">{title}</h2>
+        {description ? <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">{description}</p> : null}
       </div>
-      <div className="mt-5">{children}</div>
-    </section>
-  );
-}
-
-function ScoreBar({ label, score }: { label: string; score: number }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-[var(--ink-soft)]">{label}</span>
-        <span className={`font-semibold ${scoreTone(score)}`}>{score}</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-black/8">
-        <div
-          className="h-full rounded-full bg-[linear-gradient(90deg,#0f7e63,#27d090)]"
-          style={{ width: `${score}%` }}
-        />
-      </div>
+      {actions ? <div className="mt-4 md:mt-0 md:ml-4">{actions}</div> : null}
     </div>
   );
 }
 
-function OperatorPoster({ result }: { result: AnalysisResult | null }) {
-  const currentScore = result?.overallScore ?? 63;
-  const patchedScore = result?.rescoredOverall ?? 84;
-  const beforeHeadline =
-    result?.crawl.previewTargets.headlineText || "Most startup websites still undersell the product.";
-  const afterHeadline =
-    result?.patch.heroHeadline || "Make your startup legible to humans and AI in one pass.";
-
+function ScoreMeter({ label, score }: { label: string; score: number }) {
   return (
-    <div className="relative overflow-hidden rounded-[32px] border border-white/12 bg-[#142311] p-5 text-[#eefef8] shadow-[0_28px_120px_rgba(20,35,17,0.28)] lg:p-6">
-      <div className="absolute -top-16 right-0 h-52 w-52 rounded-full bg-[rgba(31,185,129,0.22)] blur-3xl animate-orbit-slow" />
-      <div className="absolute bottom-2 left-4 h-36 w-36 rounded-full bg-[rgba(72,154,255,0.16)] blur-3xl animate-float-slow" />
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_36%,rgba(0,0,0,0.08))]" />
-
-      <div className="relative space-y-6">
-        <div className="flex items-center justify-between text-[11px] font-semibold tracking-[0.22em] uppercase text-[#96dbbf]">
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[#3cffa7] animate-pulse-soft" />
-            Live operator loop
-          </span>
-          <span>Before → patch → preview</span>
-        </div>
-
-        <div className="grid gap-5 rounded-[28px] border border-white/10 bg-white/6 p-5 backdrop-blur">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-semibold tracking-[0.22em] text-[#96dbbf] uppercase">
-                Answerability delta
-              </p>
-              <div className="mt-3 flex items-end gap-3">
-                <span className="text-6xl font-semibold tracking-[-0.08em] text-[#f6fff9]">
-                  {currentScore}
-                </span>
-                <span className="mb-2 text-xl text-[#96dbbf]">→</span>
-                <span className="text-6xl font-semibold tracking-[-0.08em] text-[#62f0bd]">
-                  {patchedScore}
-                </span>
-              </div>
-            </div>
-            <div className="rounded-full border border-white/12 bg-white/8 px-3 py-2 text-xs text-[#d7f6e9]">
-              {patchedScore - currentScore >= 0 ? "+" : ""}
-              {patchedScore - currentScore} projected lift
-            </div>
-          </div>
-
-          <div className="space-y-3 text-sm text-[#dff9ef]">
-            {EMPTY_LOOP.map((item, index) => (
-              <div key={item} className="flex gap-3 border-t border-white/8 pt-3 first:border-t-0 first:pt-0">
-                <span className="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-white/10 text-xs font-semibold">
-                  {index + 1}
-                </span>
-                <p className="leading-6">{item}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid gap-3 rounded-[28px] border border-white/10 bg-white/6 p-5 backdrop-blur">
-          <p className="text-[11px] font-semibold tracking-[0.22em] text-[#96dbbf] uppercase">
-            Hero patch preview
-          </p>
-          <div className="rounded-[24px] border border-white/10 bg-black/16 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#86c9af]">Before</p>
-            <p className="mt-2 text-sm leading-6 text-[#d4f2e5]">{beforeHeadline}</p>
-          </div>
-          <div className="rounded-[24px] border border-[rgba(98,240,189,0.28)] bg-[rgba(98,240,189,0.08)] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#95f7cb]">After</p>
-            <p className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[#f7fffb]">
-              {afterHeadline}
-            </p>
-          </div>
-        </div>
+    <div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-600">{label}</span>
+        <span className={`font-semibold ${scoreTone(score)}`}>{score}</span>
+      </div>
+      <div className="mt-2 h-2 rounded-full bg-gray-200">
+        <div
+          className="h-2 rounded-full bg-indigo-600"
+          style={{ width: `${score}%` }}
+        />
       </div>
     </div>
   );
@@ -244,302 +154,266 @@ export function OperatorDashboard() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1480px] flex-col gap-7 px-5 py-6 text-[var(--foreground)] sm:px-8 lg:px-10 lg:py-8">
-      <section className="relative overflow-hidden rounded-[38px] border border-[var(--line)] bg-[linear-gradient(140deg,rgba(255,255,255,0.92),rgba(231,250,242,0.88)_45%,rgba(255,243,225,0.94))] px-6 py-7 shadow-[var(--shadow)] lg:min-h-[calc(100svh-4rem)] lg:px-8 lg:py-8">
-        <div className="absolute inset-y-0 right-0 w-[44%] bg-[radial-gradient(circle_at_top,rgba(31,185,129,0.15),transparent_48%)]" />
-        <div className="absolute -left-20 top-10 h-56 w-56 rounded-full bg-[rgba(31,185,129,0.12)] blur-3xl animate-float-slow" />
-        <div className="absolute bottom-6 right-20 h-48 w-48 rounded-full bg-[rgba(72,154,255,0.08)] blur-3xl animate-orbit-slow" />
+    <main className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="border-b border-gray-200 pb-10">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,0.8fr)]">
+            <div>
+              <p className="text-sm font-semibold text-indigo-600">Website Explainability Audit</p>
+              <h1 className="mt-2 max-w-4xl text-4xl font-semibold tracking-tight text-gray-900 sm:text-5xl">
+                Can-AI-Explain-You?
+              </h1>
+              <p className="mt-4 max-w-3xl text-base leading-7 text-gray-600">
+                A startup website explainability audit. Paste in a public URL and a target buyer
+                persona, and the app checks whether your company is legible to both buyers and AI
+                assistants, audits five core buyer questions, and generates a ready-to-use homepage
+                patch with a live before-and-after preview.
+              </p>
 
-        <div className="relative grid gap-8 lg:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] lg:items-stretch">
-          <div className="flex flex-col justify-between">
-            <div className="space-y-6 animate-rise-in">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-white/80 px-3 py-1 text-[11px] font-semibold tracking-[0.24em] uppercase text-[var(--ink-soft)]">
-                AI Website Operator
-                <span className="h-2 w-2 rounded-full bg-[var(--accent)] animate-pulse-soft" />
-              </div>
-
-              <div className="max-w-4xl space-y-5">
-                <h1 className="max-w-4xl text-[clamp(3rem,7vw,6rem)] font-semibold leading-[0.92] tracking-[-0.08em] text-[#10200f]">
-                  Make your startup easy to explain before the room loses interest.
-                </h1>
-                <p className="max-w-2xl text-base leading-8 text-[var(--ink-soft)] sm:text-lg">
-                  Drop in a live startup URL and a buyer persona. The app audits whether an AI
-                  assistant can explain the company clearly, writes a sharper homepage patch, and
-                  previews those edits directly on a proxied version of the real site.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-3 text-sm text-[var(--ink-soft)]">
-                {DELIVERABLES.map((item) => (
-                  <span
-                    key={item}
-                    className="rounded-full border border-[var(--line)] bg-white/75 px-3 py-2"
-                  >
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <form
-              className="mt-7 grid gap-4 rounded-[30px] border border-[var(--line)] bg-[var(--surface-strong)] p-5 shadow-[0_20px_60px_rgba(20,35,17,0.08)] backdrop-blur lg:mt-8 animate-rise-in"
-              onSubmit={handleSubmit}
-            >
-              <div className="grid gap-4 xl:grid-cols-[0.95fr_1.15fr]">
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-[var(--ink-soft)]">Website URL</span>
-                  <input
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    placeholder="https://example.com"
-                    className="h-14 w-full rounded-2xl border border-[var(--line)] bg-white/88 px-4 outline-none transition focus:border-[var(--accent)] focus:ring-4 focus:ring-[rgba(31,185,129,0.15)]"
-                  />
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-medium text-[var(--ink-soft)]">Target buyer persona</span>
-                  <textarea
-                    value={persona}
-                    onChange={(event) => setPersona(event.target.value)}
-                    rows={3}
-                    className="w-full rounded-2xl border border-[var(--line)] bg-white/88 px-4 py-3 outline-none transition focus:border-[var(--accent)] focus:ring-4 focus:ring-[rgba(31,185,129,0.15)]"
-                  />
-                </label>
-              </div>
-
-              <div className="flex flex-col gap-3 border-t border-[var(--line)] pt-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="text-sm leading-7 text-[var(--ink-soft)]">
-                  Live mode uses the OpenAI API from the server. Demo mode keeps the pitch reliable
-                  if a real site is slow or blocks crawling.
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="h-13 rounded-full bg-[#142311] px-5 py-3 text-sm font-semibold tracking-[0.14em] text-white uppercase transition hover:bg-[#0f190d] disabled:cursor-wait disabled:opacity-70"
-                  >
-                    {isLoading ? "Running…" : "Analyze live site"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void runAnalysis(true)}
-                    disabled={isLoading}
-                    className="h-13 rounded-full border border-[var(--line-strong)] bg-white/88 px-5 py-3 text-sm font-semibold tracking-[0.12em] text-[var(--ink-soft)] uppercase transition hover:border-[var(--accent)] hover:text-[var(--accent-deep)] disabled:cursor-wait disabled:opacity-70"
-                  >
-                    Load demo fixture
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            {error ? (
-              <div className="mt-4 rounded-2xl border border-[rgba(255,123,84,0.28)] bg-[rgba(255,123,84,0.08)] px-4 py-3 text-sm text-[#6b3a2c] animate-rise-in">
-                {error}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="lg:pl-2">
-            <OperatorPoster result={result} />
-          </div>
-        </div>
-      </section>
-
-      {!result ? (
-        <section className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
-          <SectionShell
-            title="What happens in the room"
-            eyebrow="Flow"
-            summary="Keep the demo legible and fast: one URL in, one before-and-after story out."
-          >
-            <div className="grid gap-4 lg:grid-cols-3">
-              {[
-                {
-                  title: "Audit",
-                  body: "Answer the five buyer questions with evidence pulled directly from the site so the critique feels grounded, not generic.",
-                },
-                {
-                  title: "Patch",
-                  body: "Generate the homepage rewrite people actually remember: sharper hero, CTA, FAQ block, and machine-readable schema.",
-                },
-                {
-                  title: "Preview",
-                  body: "Flip from the original homepage to the patched version for the visual payoff without rebuilding the target site locally.",
-                },
-              ].map((item, index) => (
-                <article
-                  key={item.title}
-                  className="rounded-[24px] border border-[var(--line)] bg-white/76 p-5 animate-rise-in"
-                  style={{ animationDelay: `${index * 120}ms` }}
-                >
-                  <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                    0{index + 1}
-                  </p>
-                  <h3 className="mt-3 text-xl font-semibold tracking-[-0.03em]">{item.title}</h3>
-                  <p className="mt-3 text-sm leading-7 text-[var(--ink-soft)]">{item.body}</p>
-                </article>
-              ))}
-            </div>
-          </SectionShell>
-
-          <SectionShell
-            title="What gets scored"
-            eyebrow="Rubric"
-            summary="The app is opinionated about what a good startup website should answer immediately."
-          >
-            <div className="grid gap-4 text-sm text-[var(--ink-soft)]">
-              {[
-                "What does this company do?",
-                "Who is it for?",
-                "Why should I trust it?",
-                "What should I do next?",
-                "How confidently could an AI assistant explain it from the site alone?",
-              ].map((question) => (
-                <div
-                  key={question}
-                  className="flex items-start gap-3 border-b border-[var(--line)] pb-4 last:border-b-0 last:pb-0"
-                >
-                  <span className="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-[var(--accent)]" />
-                  <p className="leading-7">{question}</p>
-                </div>
-              ))}
-            </div>
-          </SectionShell>
-        </section>
-      ) : null}
-
-      {result ? (
-        <>
-          <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-            <SectionShell
-              title="Operator verdict"
-              eyebrow="Overview"
-              summary="A tight read on whether the current site is understandable, trustworthy, and easy for AI assistants to restate."
-              className="animate-rise-in"
-            >
-              <div className="grid gap-6">
-                <div className="grid gap-4 rounded-[26px] border border-[var(--line)] bg-white/76 p-5 sm:grid-cols-2">
+              <form
+                className="mt-8 overflow-hidden rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-950/5"
+                onSubmit={handleSubmit}
+              >
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
                   <div>
-                    <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                      Current score
-                    </p>
-                    <p className={`mt-3 text-6xl font-semibold tracking-[-0.08em] ${scoreTone(result.overallScore)}`}>
-                      {result.overallScore}
-                    </p>
+                    <label htmlFor="website-url" className="block text-sm/6 font-medium text-gray-900">
+                      Website URL
+                    </label>
+                    <div className="mt-2">
+                      <input
+                        id="website-url"
+                        value={url}
+                        onChange={(event) => setUrl(event.target.value)}
+                        type="url"
+                        placeholder="https://example.com"
+                        className="block w-full rounded-md bg-white px-3 py-2 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600"
+                      />
+                    </div>
                   </div>
+
                   <div>
-                    <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                      Projected after patch
-                    </p>
-                    <p
-                      className={`mt-3 text-6xl font-semibold tracking-[-0.08em] ${scoreTone(
-                        result.rescoredOverall,
-                      )}`}
+                    <label htmlFor="buyer-persona" className="block text-sm/6 font-medium text-gray-900">
+                      Target buyer persona
+                    </label>
+                    <div className="mt-2">
+                      <textarea
+                        id="buyer-persona"
+                        value={persona}
+                        onChange={(event) => setPersona(event.target.value)}
+                        rows={4}
+                        className="block w-full rounded-md bg-white px-3 py-2 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-col gap-4 border-t border-gray-200 pt-6 lg:flex-row lg:items-center lg:justify-between">
+                  <p className="max-w-2xl text-sm leading-6 text-gray-600">
+                    Live mode audits a real site through the OpenAI API. Demo mode is the fallback
+                    when a site is slow, blocked, or you want a reliable walkthrough.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="inline-flex items-center rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-70"
                     >
-                      {result.rescoredOverall}
-                    </p>
+                      {isLoading ? "Running..." : "Analyze live site"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runAnalysis(true)}
+                      disabled={isLoading}
+                      className="inline-flex items-center rounded-md bg-white px-3.5 py-2.5 text-sm font-semibold text-gray-900 shadow-xs ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      Load demo fixture
+                    </button>
                   </div>
                 </div>
+              </form>
 
-                <div className="space-y-4 rounded-[26px] border border-[var(--line)] bg-[#142311] p-5 text-[#eefef8]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-[11px] font-semibold tracking-[0.22em] text-[#96dbbf] uppercase">
-                      Summary
-                    </p>
-                    <span className="rounded-full border border-white/12 bg-white/6 px-3 py-1 text-xs text-[#cbeedf]">
-                      {result.mode === "demo" ? "Fixture data" : "Generated live"} ·{" "}
-                      {formatTimestamp(result.generatedAt)}
-                    </span>
+              {error ? (
+                <div className="mt-4 rounded-md bg-amber-50 p-4 ring-1 ring-inset ring-amber-200">
+                  <div className="text-sm">
+                    <h3 className="font-medium text-amber-800">Request could not be completed</h3>
+                    <p className="mt-2 text-amber-700">{error}</p>
                   </div>
-                  <p className="text-sm leading-7 text-[#dcfaf0]">{result.siteSummary}</p>
                 </div>
+              ) : null}
+            </div>
 
-                <div className="grid gap-4">
-                  <ScoreBar label="Clarity" score={result.rubric.clarity} />
-                  <ScoreBar label="Audience fit" score={result.rubric.audienceFit} />
-                  <ScoreBar label="Proof" score={result.rubric.proof} />
-                  <ScoreBar label="CTA" score={result.rubric.cta} />
-                  <ScoreBar label="AI answerability" score={result.rubric.aiAnswerability} />
-                </div>
+            <aside className="border-t border-gray-200 pt-8 lg:border-t-0 lg:border-l lg:pl-8 lg:pt-0">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">What you get</p>
+                <ul className="mt-4 space-y-3 text-sm leading-6 text-gray-600">
+                  {DELIVERABLES.map((item) => (
+                    <li key={item} className="flex gap-3">
+                      <span className="mt-2 h-1.5 w-1.5 rounded-full bg-indigo-600" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
 
-                <div className="rounded-[26px] border border-[rgba(255,123,84,0.24)] bg-[rgba(255,123,84,0.08)] p-5">
-                  <p className="text-[11px] font-semibold tracking-[0.22em] text-[#8a4a38] uppercase">
-                    Missing information
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {result.missingInformation.map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-full border border-[rgba(255,123,84,0.24)] px-3 py-2 text-sm text-[#6e3b2d]"
-                      >
-                        {item}
+              <div className="mt-8">
+                <p className="text-sm font-semibold text-gray-900">Flow</p>
+                <ol className="mt-4 space-y-4 text-sm leading-6 text-gray-600">
+                  {EMPTY_STEPS.map((item, index) => (
+                    <li key={item} className="flex gap-3">
+                      <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-gray-900 text-xs font-semibold text-white">
+                        {index + 1}
                       </span>
-                    ))}
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </aside>
+          </div>
+
+          {!result ? (
+            <div className="mt-10 grid gap-10 lg:grid-cols-2">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">What gets tested</h2>
+                <ul className="mt-4 divide-y divide-gray-200 rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5">
+                  {SCORE_QUESTIONS.map((question) => (
+                    <li key={question} className="px-6 py-4 text-sm leading-6 text-gray-700">
+                      {question}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">How it works</h2>
+                <div className="mt-4 rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-950/5">
+                  <ol className="space-y-4 text-sm leading-6 text-gray-600">
+                    <li>Start with the demo fixture if you want to see the full workflow first.</li>
+                    <li>Use a public homepage or product page for a live explainability audit.</li>
+                    <li>Review the score, missing info, patch payload, evidence, and preview together.</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {result ? (
+          <>
+            <section className="border-b border-gray-200 py-10">
+              <SectionHeading
+                title="Overview"
+                description="A quick read on whether buyers and AI assistants can explain the company from the site alone."
+              />
+
+              <dl className="mt-6 grid grid-cols-1 divide-y divide-gray-200 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5 md:grid-cols-3 md:divide-x md:divide-y-0">
+                <div className="px-6 py-5">
+                  <dt className="text-sm font-medium text-gray-500">Current score</dt>
+                  <dd className={`mt-2 text-4xl font-semibold tracking-tight ${scoreTone(result.overallScore)}`}>
+                    {result.overallScore}
+                  </dd>
+                </div>
+                <div className="px-6 py-5">
+                  <dt className="text-sm font-medium text-gray-500">Projected after patch</dt>
+                  <dd
+                    className={`mt-2 text-4xl font-semibold tracking-tight ${scoreTone(
+                      result.rescoredOverall,
+                    )}`}
+                  >
+                    {result.rescoredOverall}
+                  </dd>
+                </div>
+                <div className="px-6 py-5">
+                  <dt className="text-sm font-medium text-gray-500">Run</dt>
+                  <dd className="mt-2 text-sm leading-6 text-gray-700">
+                    {result.mode === "demo" ? "Fixture data" : "Generated live"}
+                    <br />
+                    {formatTimestamp(result.generatedAt)}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+                  <p className="mt-3 max-w-3xl text-sm leading-7 text-gray-600">{result.siteSummary}</p>
+
+                  <div className="mt-8 grid gap-4 sm:grid-cols-2">
+                    <ScoreMeter label="Clarity" score={result.rubric.clarity} />
+                    <ScoreMeter label="Audience fit" score={result.rubric.audienceFit} />
+                    <ScoreMeter label="Proof" score={result.rubric.proof} />
+                    <ScoreMeter label="CTA" score={result.rubric.cta} />
+                    <div className="sm:col-span-2">
+                      <ScoreMeter label="AI answerability" score={result.rubric.aiAnswerability} />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="rounded-md bg-amber-50 p-4 ring-1 ring-inset ring-amber-200">
+                    <h3 className="text-sm font-medium text-amber-900">Missing information</h3>
+                    <ul className="mt-3 space-y-2 text-sm leading-6 text-amber-800">
+                      {result.missingInformation.map((item) => (
+                        <li key={item}>• {item}</li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
               </div>
-            </SectionShell>
+            </section>
 
-            <SectionShell
-              title="Patch payload"
-              eyebrow="Output"
-              summary="This is the material you can paste into the homepage, CMS, or design file immediately after the demo."
-              className="animate-rise-in"
-            >
-              <div className="grid gap-6">
-                <div className="grid gap-5 rounded-[26px] border border-[var(--line)] bg-white/76 p-5">
+            <section className="border-b border-gray-200 py-10">
+              <SectionHeading
+                title="Patch payload"
+                description="Concrete homepage copy you can move into a CMS draft, design review, or live page update."
+              />
+
+              <div className="mt-6 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5">
+                <div className="px-6 py-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                        Hero headline
-                      </p>
-                      <p className="mt-3 text-3xl font-semibold tracking-[-0.05em]">
+                      <p className="text-sm font-medium text-gray-500">Hero headline</p>
+                      <p className="mt-2 text-3xl font-semibold tracking-tight text-gray-900">
                         {result.patch.heroHeadline}
                       </p>
                     </div>
                     <CopyButton value={result.patch.heroHeadline} />
                   </div>
+                </div>
 
-                  <div className="border-t border-[var(--line)] pt-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                          Hero subheadline
-                        </p>
-                        <p className="mt-3 max-w-3xl text-base leading-7 text-[var(--ink-soft)]">
-                          {result.patch.heroSubheadline}
-                        </p>
-                      </div>
-                      <CopyButton value={result.patch.heroSubheadline} />
+                <div className="border-t border-gray-200 px-6 py-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Hero subheadline</p>
+                      <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-600">
+                        {result.patch.heroSubheadline}
+                      </p>
                     </div>
-                  </div>
-
-                  <div className="border-t border-[var(--line)] pt-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                          Primary CTA
-                        </p>
-                        <p className="mt-3 inline-flex rounded-full bg-[#142311] px-4 py-2 text-sm font-semibold text-white">
-                          {result.patch.primaryCta}
-                        </p>
-                      </div>
-                      <CopyButton value={result.patch.primaryCta} />
-                    </div>
+                    <CopyButton value={result.patch.heroSubheadline} />
                   </div>
                 </div>
 
-                <div className="grid gap-5 rounded-[26px] border border-[var(--line)] bg-white/76 p-5">
+                <div className="border-t border-gray-200 px-6 py-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                        FAQ block
+                      <p className="text-sm font-medium text-gray-500">Primary CTA</p>
+                      <p className="mt-2 inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
+                        {result.patch.primaryCta}
                       </p>
-                      <div className="mt-4 space-y-4">
+                    </div>
+                    <CopyButton value={result.patch.primaryCta} />
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 px-6 py-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-500">FAQ block</p>
+                      <div className="mt-4 divide-y divide-gray-200">
                         {result.patch.faqs.map((faq) => (
-                          <div key={faq.question} className="border-t border-[var(--line)] pt-4 first:border-t-0 first:pt-0">
-                            <p className="font-semibold tracking-[-0.02em]">{faq.question}</p>
-                            <p className="mt-2 text-sm leading-7 text-[var(--ink-soft)]">{faq.answer}</p>
+                          <div key={faq.question} className="py-4 first:pt-0 last:pb-0">
+                            <p className="font-semibold text-gray-900">{faq.question}</p>
+                            <p className="mt-2 text-sm leading-7 text-gray-600">{faq.answer}</p>
                           </div>
                         ))}
                       </div>
@@ -553,13 +427,11 @@ export function OperatorDashboard() {
                   </div>
                 </div>
 
-                <div className="grid gap-5 rounded-[26px] border border-[var(--line)] bg-[#142311] p-5 text-[#eefef8]">
+                <div className="border-t border-gray-200 px-6 py-6">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[11px] font-semibold tracking-[0.22em] text-[#96dbbf] uppercase">
-                        JSON-LD
-                      </p>
-                      <pre className="mt-4 overflow-x-auto rounded-2xl bg-black/20 p-4 text-xs leading-6 text-[#dcfaf0]">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-500">JSON-LD</p>
+                      <pre className="mt-4 overflow-x-auto rounded-lg bg-gray-50 p-4 text-xs leading-6 text-gray-700 ring-1 ring-inset ring-gray-200">
                         {result.patch.jsonLd}
                       </pre>
                     </div>
@@ -567,163 +439,158 @@ export function OperatorDashboard() {
                   </div>
                 </div>
 
-                <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-[26px] border border-[var(--line)] bg-white/76 p-5">
-                    <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                      Why this patch works
-                    </p>
-                    <ul className="mt-4 space-y-3 text-sm leading-7 text-[var(--ink-soft)]">
+                <div className="grid gap-0 border-t border-gray-200 lg:grid-cols-2 lg:divide-x lg:divide-gray-200">
+                  <div className="px-6 py-6">
+                    <p className="text-sm font-medium text-gray-500">Why this patch works</p>
+                    <ul className="mt-4 space-y-3 text-sm leading-7 text-gray-600">
                       {result.patch.rationale.map((point) => (
-                        <li key={point} className="border-t border-[var(--line)] pt-3 first:border-t-0 first:pt-0">
-                          {point}
-                        </li>
+                        <li key={point}>• {point}</li>
                       ))}
                     </ul>
                   </div>
-
-                  <div className="rounded-[26px] border border-[var(--line)] bg-white/76 p-5">
-                    <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                      Visual patch notes
-                    </p>
-                    <ul className="mt-4 space-y-3 text-sm leading-7 text-[var(--ink-soft)]">
+                  <div className="border-t border-gray-200 px-6 py-6 lg:border-t-0">
+                    <p className="text-sm font-medium text-gray-500">Visual patch notes</p>
+                    <ul className="mt-4 space-y-3 text-sm leading-7 text-gray-600">
                       {result.patch.diffNotes.map((point) => (
-                        <li key={point} className="border-t border-[var(--line)] pt-3 first:border-t-0 first:pt-0">
-                          {point}
-                        </li>
+                        <li key={point}>• {point}</li>
                       ))}
                     </ul>
                   </div>
                 </div>
               </div>
-            </SectionShell>
-          </section>
+            </section>
 
-          <section className="grid gap-6 xl:grid-cols-[1.04fr_0.96fr]">
-            <SectionShell
-              title="Buyer-question audit"
-              eyebrow="Evidence"
-              summary="This is the argument you can narrate live while the audience watches the score move."
-              className="animate-rise-in"
-            >
-              <div className="grid gap-4">
-                {result.buyerQuestions.map((item) => (
-                  <article
-                    key={item.question}
-                    className="rounded-[24px] border border-[var(--line)] bg-white/76 p-5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <h3 className="max-w-2xl text-lg font-semibold tracking-[-0.03em]">
-                        {item.question}
-                      </h3>
-                      <div className="flex items-center gap-3 text-sm">
-                        <span className="rounded-full bg-black/5 px-3 py-1">Score {item.score}/5</span>
-                        <span className="rounded-full bg-black/5 px-3 py-1">
-                          Confidence {item.confidence}
-                        </span>
-                      </div>
-                    </div>
-                    <p className="mt-3 text-sm leading-7 text-[var(--ink-soft)]">{item.answer}</p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {item.evidenceUrls.map((evidenceUrl) => (
-                        <span
-                          key={evidenceUrl}
-                          className="rounded-full border border-[var(--line)] bg-[var(--accent-muted)] px-3 py-1 text-xs text-[var(--accent-deep)]"
-                        >
-                          {formatEvidenceLabel(evidenceUrl)}
-                        </span>
-                      ))}
-                    </div>
-                    {item.missingInfo.length ? (
-                      <div className="mt-4 rounded-2xl bg-black/4 p-3 text-sm text-[var(--ink-soft)]">
-                        Missing: {item.missingInfo.join(" · ")}
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            </SectionShell>
+            <section className="grid gap-10 border-b border-gray-200 py-10 lg:grid-cols-2">
+              <div>
+                <SectionHeading
+                  title="Buyer-question audit"
+                  description="The evidence-backed read on the five questions a buyer or AI assistant should be able to answer."
+                />
+                <div className="mt-6 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5">
+                  <ul className="divide-y divide-gray-200">
+                    {result.buyerQuestions.map((item) => (
+                      <li key={item.question} className="px-6 py-6">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <h3 className="max-w-2xl text-base font-semibold text-gray-900">
+                            {item.question}
+                          </h3>
+                          <div className="flex flex-wrap gap-2 text-xs font-medium text-gray-600">
+                            <span className="rounded-md bg-gray-100 px-2 py-1">
+                              Score {item.score}/5
+                            </span>
+                            <span className="rounded-md bg-gray-100 px-2 py-1">
+                              Confidence {item.confidence}
+                            </span>
+                          </div>
+                        </div>
 
-            <SectionShell
-              title="Crawled pages"
-              eyebrow="Source material"
-              summary="These are the pages the operator actually used, so the critique remains grounded in evidence instead of generic SEO advice."
-              className="animate-rise-in"
-            >
-              <div className="space-y-4">
-                {result.crawl.pages.map((page) => (
-                  <article
-                    key={page.url}
-                    className="rounded-[24px] border border-[var(--line)] bg-white/76 p-5"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-[0.22em] text-[var(--ink-soft)] uppercase">
-                          {page.role}
-                        </p>
-                        <h3 className="mt-2 text-lg font-semibold tracking-[-0.03em]">
-                          {page.title || page.url}
-                        </h3>
-                      </div>
-                      <span className="rounded-full bg-black/5 px-3 py-1 text-xs text-[var(--ink-soft)]">
-                        {new URL(page.url).pathname}
-                      </span>
-                    </div>
-                    {page.h1 ? (
-                      <p className="mt-3 text-sm font-medium text-[var(--foreground)]">H1: {page.h1}</p>
-                    ) : null}
-                    {page.metaDescription ? (
-                      <p className="mt-2 text-sm leading-7 text-[var(--ink-soft)]">
-                        {page.metaDescription}
-                      </p>
-                    ) : null}
-                    <p className="mt-3 text-sm leading-7 text-[var(--ink-soft)]">{page.excerpt}</p>
-                  </article>
-                ))}
-              </div>
-            </SectionShell>
-          </section>
+                        <p className="mt-3 text-sm leading-7 text-gray-600">{item.answer}</p>
 
-          <SectionShell
-            title="Patched homepage preview"
-            eyebrow="Live payoff"
-            summary="The original site stays recognizable, but the key message, supporting line, and CTA are swapped so the audience can feel the improvement immediately."
-            className="animate-rise-in"
-          >
-            {result.preview.supportsPatchedPreview ? (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <div className="overflow-hidden rounded-[26px] border border-[var(--line)] bg-white/88">
-                  <div className="border-b border-[var(--line)] px-4 py-3 text-sm font-medium text-[var(--ink-soft)]">
-                    Original snapshot
-                  </div>
-                  <iframe
-                    title="Original homepage preview"
-                    src={buildPreviewUrl(result, "original")}
-                    className="h-[680px] w-full bg-white"
-                    sandbox=""
-                  />
-                </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {item.evidenceUrls.map((evidenceUrl) => (
+                            <span
+                              key={evidenceUrl}
+                              className="rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200"
+                            >
+                              {formatEvidenceLabel(evidenceUrl)}
+                            </span>
+                          ))}
+                        </div>
 
-                <div className="overflow-hidden rounded-[26px] border border-[var(--line)] bg-white/88">
-                  <div className="border-b border-[var(--line)] px-4 py-3 text-sm font-medium text-[var(--ink-soft)]">
-                    Patched homepage preview
-                  </div>
-                  <iframe
-                    title="Patched homepage preview"
-                    src={buildPreviewUrl(result, "patched")}
-                    className="h-[680px] w-full bg-white"
-                    sandbox=""
-                  />
+                        {item.missingInfo.length ? (
+                          <p className="mt-4 text-sm text-gray-500">
+                            Missing: {item.missingInfo.join(" · ")}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-[24px] border border-[var(--line)] bg-white/75 p-5 text-sm leading-7 text-[var(--ink-soft)]">
-                The demo fixture does not ship with a live preview overlay, but the live path still
-                supports proxied homepage patching when you run a real analysis.
+
+              <div>
+                <SectionHeading
+                  title="Crawled pages"
+                  description="The source pages that informed the explainability audit."
+                />
+                <div className="mt-6 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5">
+                  <ul className="divide-y divide-gray-200">
+                    {result.crawl.pages.map((page) => (
+                      <li key={page.url} className="px-6 py-6">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                              {page.role}
+                            </p>
+                            <h3 className="mt-1 text-base font-semibold text-gray-900">
+                              {page.title || page.url}
+                            </h3>
+                          </div>
+                          <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600">
+                            {new URL(page.url).pathname || "/"}
+                          </span>
+                        </div>
+
+                        {page.h1 ? (
+                          <p className="mt-3 text-sm font-medium text-gray-900">H1: {page.h1}</p>
+                        ) : null}
+                        {page.metaDescription ? (
+                          <p className="mt-2 text-sm leading-7 text-gray-600">{page.metaDescription}</p>
+                        ) : null}
+                        <p className="mt-2 text-sm leading-7 text-gray-600">{page.excerpt}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
-            )}
-          </SectionShell>
-        </>
-      ) : null}
+            </section>
+
+            <section className="py-10">
+              <SectionHeading
+                title="Patched homepage preview"
+                description="A direct before-and-after view of the live homepage shell with the patched hero copy applied."
+              />
+
+              {result.preview.supportsPatchedPreview ? (
+                <div className="mt-6 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-gray-950/5">
+                  <div className="grid gap-px bg-gray-200 xl:grid-cols-2">
+                    <div className="bg-white">
+                      <div className="border-b border-gray-200 px-4 py-3 text-sm font-medium text-gray-600">
+                        Original snapshot
+                      </div>
+                      <iframe
+                        title="Original homepage preview"
+                        src={buildPreviewUrl(result, "original")}
+                        className="h-[680px] w-full bg-white"
+                        sandbox=""
+                      />
+                    </div>
+
+                    <div className="bg-white">
+                      <div className="border-b border-gray-200 px-4 py-3 text-sm font-medium text-gray-600">
+                        Patched homepage preview
+                      </div>
+                      <iframe
+                        title="Patched homepage preview"
+                        src={buildPreviewUrl(result, "patched")}
+                        className="h-[680px] w-full bg-white"
+                        sandbox=""
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 rounded-md bg-amber-50 p-4 ring-1 ring-inset ring-amber-200">
+                  <p className="text-sm text-amber-800">
+                    The demo fixture does not include a live preview overlay, but live analyses still
+                    support proxied homepage patching.
+                  </p>
+                </div>
+              )}
+            </section>
+          </>
+        ) : null}
+      </div>
     </main>
   );
 }

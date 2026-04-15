@@ -81,6 +81,14 @@ export async function GET(request: Request) {
               primaryCta: searchParams.get("cta") || "",
             }
           : undefined,
+      targets:
+        mode === "patched"
+          ? {
+              headlineText: searchParams.get("originalHeadline") || "",
+              subheadlineText: searchParams.get("originalSubheadline") || "",
+              ctaText: searchParams.get("originalCta") || "",
+            }
+          : undefined,
     });
 
     return new Response(html, {

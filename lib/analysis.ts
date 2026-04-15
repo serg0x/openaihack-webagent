@@ -123,7 +123,7 @@ function buildSiteDossier(crawl: CrawlResult) {
         `H1: ${page.h1 || "n/a"}`,
         `Headings: ${page.headings.slice(0, 6).join(" | ") || "n/a"}`,
         `Excerpt: ${page.excerpt || "n/a"}`,
-        `Main text:\n${page.mainText.slice(0, 2400) || "n/a"}`,
+        `Main text:\n${page.mainText.slice(0, 1600) || "n/a"}`,
       ].join("\n");
     })
     .join("\n\n---\n\n");
@@ -143,9 +143,9 @@ export async function analyzeSite({
   const evidenceUrls = crawl.pages.map((page) => page.url);
   const response = await client.responses.create({
     model: getOpenAIModel(),
-    reasoning: { effort: "medium" },
+    reasoning: { effort: "low" },
     store: false,
-    max_output_tokens: 3200,
+    max_output_tokens: 5000,
     text: {
       format: {
         type: "json_schema",
@@ -201,6 +201,12 @@ export async function analyzeSite({
   });
 
   if (!response.output_text) {
+    if (response.incomplete_details?.reason === "max_output_tokens") {
+      throw new Error(
+        "The analysis response was cut off before the JSON result was returned. Try again or use a smaller site.",
+      );
+    }
+
     throw new Error("The model returned an empty analysis.");
   }
 

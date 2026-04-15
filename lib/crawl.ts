@@ -6,8 +6,13 @@ import type { CrawlPage, CrawlResult, PageRole, PreviewTargets } from "@/lib/typ
 
 const REQUEST_HEADERS = {
   "user-agent":
-    "AI Website Operator/0.1 (+https://localhost demo bot; hackathon preview)",
-  accept: "text/html,application/xhtml+xml",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+  accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  "cache-control": "no-cache",
+  pragma: "no-cache",
+  "upgrade-insecure-requests": "1",
 };
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_HTML_BYTES = 1_500_000;
@@ -25,6 +30,36 @@ const PAGE_ROLE_RULES: Array<{ role: PageRole; patterns: RegExp[] }> = [
 
 function clip(text: string, maxLength: number) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function describeFetchFailure(url: string, status: number) {
+  if (status === 401) {
+    return {
+      message: `The page at ${url} requires authentication before it can be crawled.`,
+      status,
+    };
+  }
+
+  if (status === 403) {
+    return {
+      message:
+        `The page at ${url} is public in a browser but blocks automated crawling from this server (403). ` +
+        "Try another public marketing page or use the demo fixture.",
+      status,
+    };
+  }
+
+  if (status === 429) {
+    return {
+      message: `The page at ${url} is rate-limiting automated requests right now (429). Try again shortly.`,
+      status,
+    };
+  }
+
+  return {
+    message: `Could not fetch ${url} (${status}).`,
+    status: 502,
+  };
 }
 
 function normalizeWhitespace(value: string) {
@@ -194,7 +229,8 @@ export async function fetchHtml(rawUrl: string) {
     }
 
     if (!response.ok) {
-      throw new AppRouteError(`Could not fetch ${currentUrl} (${response.status}).`, 502);
+      const failure = describeFetchFailure(currentUrl, response.status);
+      throw new AppRouteError(failure.message, failure.status);
     }
 
     const contentType = response.headers.get("content-type") ?? "";
@@ -293,22 +329,41 @@ function extractTextBlocks(html: string) {
 }
 
 function findHeroSubheadline($: ReturnType<typeof load>) {
-  const heroSection =
-    $("main h1").first().closest("section, div") ||
-    $("h1").first().closest("section, div");
-  const scopedParagraph =
-    heroSection.find("p").filter((_, element) => normalizeWhitespace($(element).text()).length > 35).first() ||
-    $("main p").filter((_, element) => normalizeWhitespace($(element).text()).length > 35).first() ||
-    $("p").filter((_, element) => normalizeWhitespace($(element).text()).length > 35).first();
+  const headline = $("main h1").first().length ? $("main h1").first() : $("h1").first();
+  const heroSection = headline.closest("section, article, div");
+  const siblingCandidate = headline
+    .nextAll("p, div, span")
+    .filter((_, element) => normalizeWhitespace($(element).text()).length > 35)
+    .first();
+  const sectionCandidate = heroSection
+    .find("p, div, span")
+    .filter((_, element) => normalizeWhitespace($(element).text()).length > 35)
+    .first();
+  const mainCandidate = $("main p, main div, main span")
+    .filter((_, element) => normalizeWhitespace($(element).text()).length > 35)
+    .first();
+  const pageCandidate = $("p, div, span")
+    .filter((_, element) => normalizeWhitespace($(element).text()).length > 35)
+    .first();
+  const scopedCopy = siblingCandidate.length
+    ? siblingCandidate
+    : sectionCandidate.length
+      ? sectionCandidate
+      : mainCandidate.length
+        ? mainCandidate
+        : pageCandidate;
 
-  return normalizeWhitespace(scopedParagraph.text());
+  return normalizeWhitespace(scopedCopy.text());
 }
 
 function findHeroCta($: ReturnType<typeof load>) {
-  const candidates = $("main a, main button, header a, header button, a, button")
+  const candidates = $("main a span, main button span, main a, main button, a span, button span, a, button")
     .map((_, element) => {
       const text = normalizeWhitespace($(element).text());
-      const href = $(element).attr("href") || "";
+      const control = $(element).closest("a, button").first().length
+        ? $(element).closest("a, button").first()
+        : $(element);
+      const href = control.attr("href") || "";
 
       if (!text || text.length > 40 || text.length < 2) {
         return null;
@@ -321,7 +376,7 @@ function findHeroCta($: ReturnType<typeof load>) {
       if (href && href !== "#") {
         score += 20;
       }
-      if ($(element).closest("nav").length) {
+      if (control.closest("nav").length) {
         score -= 25;
       }
 

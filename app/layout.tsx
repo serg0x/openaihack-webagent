@@ -14,9 +14,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Website Operator",
+  title: "Can-AI-Explain-You? | Website Explainability Audit",
   description:
-    "Audit a startup website for AI answerability, generate sharper copy, and preview the patch on a live proxied page.",
+    "Can-AI-Explain-You? is a startup website explainability audit that checks whether a site is legible to buyers and AI assistants, then generates a homepage patch with a live before-and-after preview.",
 };
 
 const fontClasses = [
